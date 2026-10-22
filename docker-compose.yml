@@ -1,0 +1,12 @@
+services:
+  udpecho:
+    image: ghcr.io/mrachini/udpecho:latest
+    container_name: udpecho
+    restart: unless-stopped
+    ports:
+      - "27015:27015/udp"
+    environment:
+      UDPECHO_PORT: "27015"
+      UDPECHO_MAGIC: "NESTPROBE1|"
+    mem_limit: 64m
+    cpus: 0.25
