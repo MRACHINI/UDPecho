@@ -8,12 +8,13 @@ services:
     environment:
       UDPECHO_PORT: "27015"
       UDPECHO_MAGIC: "NESTPROBE1|"
-      UDPECHO_STATSDIR: "/data"      # per-minute CSV per client (one-way loss); "" = off
-      UDPECHO_STATSLOG: "1"          # also print the per-minute summary in `docker logs`
-    volumes:
-      - udpecho-data:/data
+      UDPECHO_STATSDIR: ""        # no per-minute CSV files (set to /data and add a volume to keep them)
+      UDPECHO_STATSLOG: "0"       # no per-minute summary lines
+      UDPECHO_LOGSEC: "0"         # no "probes from <ip>" lines
+    read_only: true               # container cannot write to its own filesystem
+    tmpfs:
+      - /data:size=1m             # RAM only: stops Docker creating an anonymous volume for the image's /data
+    logging:
+      driver: none                # docker keeps no log file at all
     mem_limit: 64m
     cpus: 0.25
-
-volumes:
-  udpecho-data:

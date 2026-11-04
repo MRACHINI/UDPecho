@@ -24,8 +24,10 @@ come back and how fast.
 docker run -d --name udpecho --restart unless-stopped -p 27015:27015/udp ghcr.io/mrachini/udpecho:latest
 ```
 
-**Docker Compose:** `docker compose up -d` with the included `docker-compose.yml` (keeps the per-minute
-CSV files in the `udpecho-data` volume).
+**Docker Compose:** `docker compose up -d` with the included `docker-compose.yml`. It writes **nothing to disk**:
+no CSV files, no log lines, no Docker log file (`logging: none`), read-only container, `/data` only in RAM.
+To keep the per-minute one-way-loss files instead, set `UDPECHO_STATSDIR: "/data"`, replace the `tmpfs` entry
+with a volume (`volumes: [udpecho-data:/data]` plus a top-level `volumes: {udpecho-data: {}}`) and drop `read_only`.
 
 **Without Docker (Python 3.8+):**
 
