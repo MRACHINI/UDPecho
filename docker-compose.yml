@@ -8,5 +8,12 @@ services:
     environment:
       UDPECHO_PORT: "27015"
       UDPECHO_MAGIC: "NESTPROBE1|"
+      UDPECHO_STATSDIR: "/data"      # per-minute CSV per client (one-way loss); "" = off
+      UDPECHO_STATSLOG: "1"          # also print the per-minute summary in `docker logs`
+    volumes:
+      - udpecho-data:/data
     mem_limit: 64m
     cpus: 0.25
+
+volumes:
+  udpecho-data:

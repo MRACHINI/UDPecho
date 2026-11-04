@@ -1,21 +1,40 @@
 # "Ping" a UDPecho server over UDP - like ping.exe, but with UDP datagrams like game traffic.
-# Usage:  .\udpecho-ping.ps1 -Target <server-ip> [-Count 600] [-IntervalMs 100] [-Port 27015]
-param([Parameter(Mandatory)][string]$Target, [int]$Count = 100, [int]$IntervalMs = 100, [int]$Port = 27015, [int]$TimeoutMs = 1000, [string]$Magic = 'NESTPROBE1|')
+# Usage:  .\udpecho-ping.ps1 -Target <server-ip> [-Count 600] [-IntervalMs 100] [-Port 27015] [-ServerTime]
+# -ServerTime (needs UDPecho v2 on the server): asks for the server's receive time and splits every round trip into
+#   "out" (to the server) and "back". The clocks are not in sync, so both are shown as EXTRA delay compared with
+#   the fastest probe: a slowdown only in "out" is on the way to the server, only in "back" on the way home.
+param([Parameter(Mandatory)][string]$Target, [int]$Count = 100, [int]$IntervalMs = 100, [int]$Port = 27015, [int]$TimeoutMs = 1000,
+      [string]$Magic = 'NESTPROBE1|', [switch]$ServerTime)
 $udp = New-Object System.Net.Sockets.UdpClient
 $udp.Client.ReceiveTimeout = $TimeoutMs
 $ep = New-Object System.Net.IPEndPoint([System.Net.Dns]::GetHostAddresses($Target)[0], $Port)
 $rtts = New-Object System.Collections.Generic.List[double]; $lost = 0
+$outs = New-Object System.Collections.Generic.List[double]; $backs = New-Object System.Collections.Generic.List[double]
+$bestOut = $null; $bestBack = $null
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
+$epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
 $id = "$env:COMPUTERNAME-$PID"
 for ($i = 1; $i -le $Count; $i++) {
-    $payload = "$Magic$id|$i"; $msg = [Text.Encoding]::ASCII.GetBytes($payload)
-    $t0 = $sw.Elapsed.TotalMilliseconds
+    $head = "$Magic$id|$i"
+    $payload = if ($ServerTime) { "$head|T" + ('0' * 16) } else { $head }
+    $msg = [Text.Encoding]::ASCII.GetBytes($payload)
+    $t0 = $sw.Elapsed.TotalMilliseconds; $w0 = ([DateTime]::UtcNow - $epoch).TotalMilliseconds
     [void]$udp.Send($msg, $msg.Length, $ep)
     $got = $false
     while (-not $got) {
         try {
             $from = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
-            if ([Text.Encoding]::ASCII.GetString($udp.Receive([ref]$from)) -eq $payload) { $got = $true; $ms = $sw.Elapsed.TotalMilliseconds - $t0; $rtts.Add($ms); "reply $i  {0:N0} ms" -f $ms }
+            $r = [Text.Encoding]::ASCII.GetString($udp.Receive([ref]$from))
+            if ($ServerTime -and $r.Length -eq $payload.Length -and $r.StartsWith("$head|T")) {
+                $ms = $sw.Elapsed.TotalMilliseconds - $t0; $srv = $r.Substring($head.Length + 2)
+                if ($srv.Trim('0') -eq '') { 'server does not fill in its time (UDPecho v1?) - run without -ServerTime'; $udp.Close(); return }
+                $out = [double]$srv / 1000 - $w0; $back = $ms - $out
+                if ($null -eq $bestOut -or $out -lt $bestOut) { $bestOut = $out }
+                if ($null -eq $bestBack -or $back -lt $bestBack) { $bestBack = $back }
+                $outs.Add($out); $backs.Add($back); $rtts.Add($ms); $got = $true
+                "reply $i  {0:N0} ms   out +{1:N0}  back +{2:N0}" -f $ms, ($out - $bestOut), ($back - $bestBack)
+            }
+            elseif (-not $ServerTime -and $r -eq $payload) { $got = $true; $ms = $sw.Elapsed.TotalMilliseconds - $t0; $rtts.Add($ms); "reply $i  {0:N0} ms" -f $ms }
         } catch { break }   # timeout
     }
     if (-not $got) { $lost++; "lost  $i" }
@@ -23,4 +42,6 @@ for ($i = 1; $i -le $Count; $i++) {
 }
 $udp.Close()
 $s = $rtts | Measure-Object -Average -Minimum -Maximum
-"`n$Target udp/$Port : sent $Count, lost $lost ({0:N1} %), rtt min/avg/max {1:N0}/{2:N0}/{3:N0} ms" -f (100 * $lost / $Count), $s.Minimum, $s.Average, $s.Maximum
+$line = "`n$Target udp/$Port : sent $Count, lost $lost ({0:N1} %), rtt min/avg/max {1:N0}/{2:N0}/{3:N0} ms" -f (100 * $lost / $Count), $s.Minimum, $s.Average, $s.Maximum
+if ($outs.Count) { $line += ", extra delay vs fastest: out avg {0:N1} ms, back avg {1:N1} ms" -f (($outs | Measure-Object -Average).Average - $bestOut), (($backs | Measure-Object -Average).Average - $bestBack) }
+$line
